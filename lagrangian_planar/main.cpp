@@ -53,6 +53,7 @@ main (int   argc,
   // initialize C++ Microphysics
 
   eos_init(small_temp, small_dens);
+  network_init();
 
   init_1d();
 

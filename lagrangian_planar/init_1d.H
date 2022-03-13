@@ -11,11 +11,15 @@
 #include <AMReX_Array.H>
 
 #include <sstream>
+#include <string>
 
 #include <extern_parameters.H>
 #include <fundamental_constants.H>
-#include <interpolate.H>
+
+#include <network.H>
+
 #include <read_model.H>
+#include <interpolate.H>
 
 using namespace amrex;
 
@@ -31,15 +35,17 @@ AMREX_INLINE void init_1d( ) {
 	read_file(model_file, lagrangian_planar);
 
 	//Apply the shift
-	
-	for (int i=0, i<lagrangian_planar.npts, ++i){
-		lagrangian_planar.r[i] -= model_shift;
+
+	for (int i=0; i < lagrangian_planar.npts; ++i){
+		lagrangian_planar.r(i) -= model_shift;
 	}
 
 	//Create a new uniform grid with nx cells.
 	if (nx > NPTS_MODEL) {
         	Error("too many zones requested -- increase NPTS_MODEL");
     	}
+
+        eos_t eos_state;
 
 
 	Array1D<Real, 0, NPTS_MODEL-1> xzn_hse;
@@ -49,29 +55,27 @@ AMREX_INLINE void init_1d( ) {
 
 	Real dx = (xmax - xmin) / static_cast<Real>(nx);
 
-	for (int i=0, i<nx, ++i){
+	for (int i=0; i < nx; ++i){
 		xznl_hse(i) = xmin + static_cast<Real>(i)*dx;
 		xznr_hse(i) = xmin + (static_cast<Real>(i) + 1.0_rt)*dx;
 		xzn_hse(i) = 0.5*(xznl_hse(i) + xznr_hse(i));
 	}
 
 	for (int i=0; i<lagrangian_planar.npts; ++i) {
-		for (int n=0; n<model::nvar, ++n){
-			
+		for (int n=0; n<model::nvar; ++n){
+
 			if (n == model::itemp) {
-				model_hse(i,n) = std::max(temp_cutoff, interpolate(xzn_hse(i), n, initial_model));	
+				model_hse(i,n) = std::max(temp_cutoff, interpolate(xzn_hse(i), n, lagrangian_planar));
 			} else {
-				model_hse(i,n) = interpolate(xzn_hse(i), n,  initial_model);
+				model_hse(i,n) = interpolate(xzn_hse(i), n,  lagrangian_planar);
 			}
 
 		}
 
-		//Now we have to make the thermodynamics of our model 
+		//Now we have to make the thermodynamics of our model
 		//consistent with the defined e.o.s for each site i.
-	
-		eos_t eos_state;
 
-		eos_state.rho = model_hse(i,model::idens); 
+		eos_state.rho = model_hse(i,model::idens);
 		eos_state.T = model_hse(i, model::itemp);
 
 		for (int n=0; n<NumSpec; ++n){
@@ -85,9 +89,9 @@ AMREX_INLINE void init_1d( ) {
 
 	//Once, the thermodynamical consistent pressure variable is
 	//defined in our model, we pick the biggest T, r[i] state.
-	
-	index_base = -1;
-	max_T = -1.0_rt;
+
+	int index_base = -1;
+	Real max_T = -1.0_rt;
 
 	for (int i=0; i<nx; ++i) {
 		if (model_hse(i, model::itemp) > max_T) {
@@ -97,17 +101,17 @@ AMREX_INLINE void init_1d( ) {
 	}
 
 	if (index_base == -1) {
-		Error("ERROR: invalid base height")
+		Error("ERROR: invalid base height");
 	}
 
 	//and make sure again that all thermodyamics is consistent for
 	//the initial choice.
-	
+
 	eos_state.rho = model_hse(index_base, model::idens);
 	eos_state.T = model_hse(index_base, model::itemp);
 
-	for (n=0; n<NumSpec; ++n) {
-		eos_temp.xn[n] = model_hse(index_base, model::ispec+n);
+	for (int n = 0; n < NumSpec; ++n) {
+		eos_state.xn[n] = model_hse(index_base, model::ispec+n);
 	}
 
 	eos(eos_input_rt, eos_state);
@@ -115,29 +119,29 @@ AMREX_INLINE void init_1d( ) {
 	model_hse(index_base, model::ipres) = eos_state.p;
 
 	//Now, we have to integrate up:
-	
+
 	Real xn[NumSpec];
 	Real dens_zone;
 	Real temp_zone;
 	Real pres_zone;
 	Real entropy;
-	logical converged_hse;
+	bool converged_hse;
 	Real dpd;
 	Real dpdr;
 	Real g_zone;
-	
+
 	//Integrating Up
 	for (int i=index_base+1; i<nx; ++i) {
 
-		delx = xzn_hse(i) - xzn_hse(i-1);
+		Real delx = xzn_hse(i) - xzn_hse(i-1);
 
-		//Compute the gravitational acceleration 
+		//Compute the gravitational acceleration
 		if (do_invsq_grav == 1) {
 			g_zone = -C::Gconst*M_enclosed/std::pow(xznl_hse(i), 2);
 		} else {
 			g_zone = g_const;
 		}
-	
+
 		//Now, we have to setup our initial guess of rho, T, and
 		//composition variables, for each i-cell.
 
@@ -207,17 +211,17 @@ AMREX_INLINE void init_1d( ) {
 		pres_zone = eos_state.p;
 
 		model_hse(i, model::idens) = eos_state.rho;
-		model_hse(i, model::itemp) = eos_state.T
+		model_hse(i, model::itemp) = eos_state.T;
 
 		for (int n=0; n<NumSpec; ++n){
-			model_hse(i, model::ispec+n) = eos_state.xn[n]
+			model_hse(i, model::ispec+n) = eos_state.xn[n];
 		}
 	}
 
-	converged_hse = false
+	converged_hse = false;
 
 	//Now we have to integrate down:
-	for (int i=index_base-1, i>=0; --i) {
+	for (int i=index_base-1; i>=0; --i) {
 
 		delx = xzn_hse(i+1) - xzn_hse(i);
 
@@ -236,13 +240,13 @@ AMREX_INLINE void init_1d( ) {
 		}
 
 		//We start the Newton's loop
-		for (int iter=0; iter<MAX_ITER, ++iter) {
+		for (int iter=0; iter<MAX_ITER; ++iter) {
 
 			pwant = model_hse(i, model::idens) - delx*0.5*(dens_zone + model_hse(i, model::idens));
 
 			eos_state.T = temp_zone;
 			eos_state.rho = dens_zone;
-			
+
 			for (int n=0; n<NumSpec; ++n) {
 				eos_state.xn[n] = xn(n);
 			}
@@ -270,7 +274,7 @@ AMREX_INLINE void init_1d( ) {
                         	std::cout << dens_zone << temp_zone << std::endl;
                         	std::cout << pwant << std::endl;
                         	std::cout << drho << dtemp << std::endl;
-                        	Error("ERROR: HSE non convergence")
+                        	Error("ERROR: HSE non convergence");
 			}
 		}
 
@@ -286,14 +290,14 @@ AMREX_INLINE void init_1d( ) {
 
 		eos(eos_input_rt, eos_state);
 
-		pres_zone = eos_state.p
+		pres_zone = eos_state.p;
 		model_hse(i, model::idens) = dens_zone;
 		model_hse(i, model::itemp) = temp_zone;
 		model_hse(i, model::ipres) = pres_zone;
 	}
 
 	//Write the file
-	
+
 	std::stringstream ss;
 	ss << nx;
 	std::string num_to_string = ss.str();
@@ -308,9 +312,9 @@ AMREX_INLINE void init_1d( ) {
 	file << "#density" << std::endl;
         file << "#temperature" << std::endl;
 	file << "#pressure" << std::endl;
-	
+
 	for (int n=0; n<NumSpec; ++n) {
-		file << "#" << spec_names_cxx[n] << std::endl;		
+		file << "#" << spec_names_cxx[n] << std::endl;
 	}
 
 	for (int i=0; i<nx; ++i) {
@@ -332,12 +336,12 @@ AMREX_INLINE void init_1d( ) {
 
 		if (do_invsq_grav == 1) {
 			g_zone == -C::Gconst * M_enclosed(i-1) / std::pow(xznr(i-1), 2);
-		else {
-			g_zone = g_const
+		} else {
+			g_zone = g_const;
 		}
 
-        	dpdr = (model_hse(i, model::ipres) - model_hse(i-1, model::ipres)) / delx;
-        	rhog = 0.5_rt * (model_hse(i, model::idens) + model_hse(i-1, model::idens)) * g_zone;
+                Real dpdr = (model_hse(i, model::ipres) - model_hse(i-1, model::ipres)) / delx;
+        	Real rhog = 0.5_rt * (model_hse(i, model::idens) + model_hse(i-1, model::idens)) * g_zone;
 
        		if (dpdr != 0.0_rt && model_hse(i+1, model::idens) > low_density_cutoff) {
             		max_hse_error = max(max_hse_error, std::abs(dpdr - rhog) / std::abs(dpdr));
@@ -347,4 +351,3 @@ AMREX_INLINE void init_1d( ) {
     	std::cout << "maximum HSE error = " << max_hse_error << std::endl;
 }
 #endif
-
