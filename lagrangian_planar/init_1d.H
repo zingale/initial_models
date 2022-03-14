@@ -171,7 +171,6 @@ AMREX_INLINE void init_1d( ) {
 		for (int iter=0; iter<MAX_ITER; ++iter) {
 			pwant = model_hse(i-1, model::ipres) + delx*0.5_rt*(dens_zone + model_hse(i-1, model::idens))*g_zone;
 
-                        std::cout << "iter = " << iter << " dens = " << dens_zone << std::endl;
 			eos_state.T = temp_zone;
 			eos_state.rho = dens_zone;
 
@@ -188,7 +187,6 @@ AMREX_INLINE void init_1d( ) {
 
 			dens_zone = amrex::max(0.9_rt*dens_zone, amrex::min(dens_zone+drho, 1.1_rt*dens_zone));
 
-                        std::cout << "diag: " << std::abs(drho)/dens_zone << std::endl;
 			if(std::abs(drho)<TOL*dens_zone) {
 				converged_hse = true;
 				break;
